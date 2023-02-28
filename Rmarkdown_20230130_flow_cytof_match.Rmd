@@ -1,0 +1,410 @@
+---
+title: "Matched Flow-Cytof analysis"
+author: "Rebecca Payne"
+date: "31/01/2023"
+output: html_document
+---
+
+Cytof data fcs files. Matched at timepoint by date to clinical lab flow data.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(readxl) 
+library(CATALYST)
+library(cowplot)
+library(flowCore)
+library(scater)
+library(SingleCellExperiment)
+library(openxlsx)
+```
+
+
+### Create SCE and use FLOWSom to identify monocytes
+Load  FCS files (CD45+), metadata, panel and create flowset
+
+```{r}
+md <- "metadata_matched.xlsx" 
+md <- read_excel(md)       
+head(data.frame(md)) 
+```
+
+
+```{r}
+fs <- read.flowSet(md$file_name, transformation = F, truncate_max_range = F)
+```
+
+```{r}
+panel <- "Panel_matched.xlsx" 
+panel <- read_excel(panel)                                         
+head(data.frame(panel)) 
+```
+
+
+```{r}
+all(panel$fcs_colname %in% colnames(fs))
+```
+
+```{r}
+setdiff(fs@frames$ilc003_BMT009_040319_03_normalized_CD45.fcs@parameters@data$desc,panel$antigen)
+```
+
+
+```{r}
+
+md$patient_id <- factor(md$patient_id, levels = c("ILC002", "ILC003", "ILC004", "ILC005", "ILC006", "ILC007", "ILC008", "ILC009", "ILC011", "ILC014", "ILC015", "ILC017", "ILC018", "ILC020", "ILC022", "ILC024", "ILC025", "ILC026", "ILC028", "ILC030", "ILC031", "ILC032", "ILC033", "ILC034", "ILC035", "ILC036", "ILC037", "ILC043", "ILC045", "ILC048", "ILC049", "ILC050", "HC002"))
+
+md$condition <- factor(md$condition, levels = c("none"))
+
+md$sample_id <- factor(md$sample_id, levels = md$sample_id[order(md$sample_id)])  
+```
+
+```{r}
+sce <- prepData(fs, panel, md, features = panel$fcs_colname, md_cols = list(file = "file_name", id = "sample_id", factors = c("patient_id", "condition")))
+
+```
+
+
+
+
+## Overview analysis of Cytof data
+
+```{r}
+n_cells(sce)
+```
+
+
+```{r fig.width= 10}
+plotNRS(sce, features = type_markers(sce), color_by = "sample_id")
+```
+
+
+## Identify monocytes for removal 
+
+Cluster FLOWSom analysis - max 20 clusters <br/>
+
+For reproducibility set random seed
+
+```{r}
+set.seed(4321)
+sce <- cluster(sce, features = "type", 
+               xdim = 10, ydim = 10, maxK = 10, 
+               verbose = FALSE, seed = 4321) 
+```
+
+## Dimension reduction - TSNE
+```{r}
+set.seed(4321)
+sce <- runDR(sce, dr = "TSNE", cells = 500, features = "type")
+```
+
+```{r}
+plotDR(sce, "TSNE", color_by = "meta10")
+```
+
+
+```{r fig.width=10}
+plotMultiHeatmap(sce, 
+    k = "meta10", scale = "never",
+    hm1 = FALSE, hm2 = c("CD14", "CD16", "CD56", "CD4"),
+    row_anno = FALSE, col_clust = FALSE,
+    hm2_pal = c("grey95", "black"))
+```
+
+### Monocytes identified by CD14+, CD16+ and CD4low expression -  cluster 1 and 4
+
+### Create new sce (sce1) with monocyte clustes removed
+
+
+```{r}
+sce1 <- filterSCE(sce, cluster_id %in% c(2,3,5,6,7,8,9,10),  k = "meta10")
+```
+
+```{r}
+sce1 <- prepData(fs, panel, md, features = panel$fcs_colname, md_cols = list(file = "file_name", id = "sample_id", factors = c("patient_id", "condition")))
+```
+
+
+### FlowSOM cluster of sce1
+```{r}
+set.seed(1021)
+sce1 <- cluster(sce1, features = "type", 
+               xdim = 10, ydim = 10, maxK = 20, 
+               verbose = FALSE, seed = 1021) 
+```
+
+
+### TSNE Dimension reduction of sce1
+```{r}
+set.seed(1589)                                                                      
+sce1 <- runDR(sce1, dr = "UMAP", cells = 500, features = "type")
+```
+
+```{r}
+set.seed(1589)                                                                      
+sce1 <- runDR(sce1, dr = "TSNE", cells = 500, features = "type")
+```
+
+
+
+```{r}
+plotDR(sce1, "UMAP", color_by = "meta20") 
+```
+
+
+
+```{r}
+plotDR(sce1, "TSNE", color_by = "meta20") 
+```
+```{r}
+plotDR(sce1, "TSNE", color_by = c("CD19", "CD3", "CD56", "CD16") )
+```
+
+
+```{r fig.width=10}
+plotExprHeatmap(sce1, features = "type",
+    by = "cluster_id", k = "meta20", m = "meta10",
+    scale = "last", q = 0.01, col_dend = FALSE, bars = TRUE, perc = TRUE)
+```
+# Need to extract proportion of 1) T-cells; CD45+CD3+ only, 2) CD4 T-cells; CD45+CD3+CD4+ only, 3) CD8 T-cells; CD45+CD3+CD8+ only, 4) B-cells; CD45+CD3-CD19+ 5) NK-cells; CD45+CD3-CD19-CD16+CD56+, 6)  gd T-cells; CD45+CD3+TCRgd+, 7) ab T-cells; CD45+CD3+TCRab+, 8) activated T-cells; CD45+CD3+HLADR+, 9) naive CD4 T-cells; CD45+CD3+CD4+CD27+CD45RA+, 10) naive CD8 T-cells; CD45+CD3+CD8+CD27+CD45RA+
+
+# pass 1; CD3+ T-cells, B-cells and NK-cells
+# pass 2; CD4 T-cell, CD8 T-cell
+# pass 3; yd T-cell, ab T-cell
+# pass 3; CD4 naive, CD8 naive
+
+#pass 1
+# CD3 T-cell (sce1) 15, 17, 6, 9, 16, 20, 19
+# B-cell (sce1) 1, 2, 5, 12
+# NK-cells (sce1) 
+
+
+
+```{r fig.width=15}
+plotMultiHeatmap(sce1, 
+    k = "meta20", scale = "first",
+    hm1 = FALSE, hm2 = c("CD45", "CD3", "CD4", "CD8", "CD16", "CD56", "CD19",  "TCRgd", "CD45RA", "CD27", "HLADR"),
+    row_anno = FALSE, col_clust = FALSE,
+    hm2_pal = c("grey95", "black"))
+```
+
+
+## pass 1; CD3+ T-cells, B-cells and NK-cells
+# Re-label meta20 clusters
+Create a xlsx file for merging clusters eg merging_pass1.xlsx
+
+
+```{r}
+merging_pass1 <- "merging_pass1.xlsx"   
+merging_pass1 <- read_excel(merging_pass1)          
+head(data.frame(merging_pass1)) 
+```
+
+Add all the factors for the cluster labels here.
+```{r}
+merging_pass1$new_cluster <- factor(merging_pass1$new_cluster,         
+                                     levels = c("T_cell", "B_cell", "NK_cell", "other" )) 
+```
+
+
+```{r}
+sce1 <- mergeClusters(sce1, k = "meta20",                                  
+                     table = merging_pass1, id = "pass1") 
+```
+
+
+## Export frequencies of merged cluster to dataframe
+
+```{r}
+ns <- table(
+  cluster_id = cluster_ids(sce1, k= "pass1"), 
+  sample_id = sample_ids(sce1))
+fq <- prop.table(ns, 2) * 100
+df <- as.data.frame(fq)
+```
+
+```{r}
+getwd()
+```
+
+# Add your working directory here.
+```{r}
+write.xlsx (df,  "/Users/rebeccapayne/OneDrive - Newcastle University/ILC_study/WBCAnalysis/FLow_Cytof_matched_analysis/FLow_Cytof_matched_project/cluster_freq_pass1.xlsx", rowNames = TRUE)
+
+```
+
+
+```{r}
+n_cells <- table(sample = sce1$sample_id, cluster = cluster_ids(sce1, "pass1"))
+
+write.xlsx(n_cells, "n_cells_pass1.xlsx")
+```
+
+## pass 2; CD4 T-cell, CD8 T-cell
+# Re-label meta20 clusters
+Create a xlsx file for merging clusters eg merging_pass2.xlsx
+
+
+```{r}
+merging_pass2 <- "merging_pass2.xlsx"   
+merging_pass2 <- read_excel(merging_pass2)          
+head(data.frame(merging_pass2)) 
+```
+
+Add all the factors for the cluster labels here.
+```{r}
+merging_pass2$new_cluster <- factor(merging_pass2$new_cluster,         
+                                     levels = c("CD4_Tcell", "CD8_Tcell", "other" )) 
+```
+
+
+```{r}
+sce1 <- mergeClusters(sce1, k = "meta20",                                  
+                     table = merging_pass2, id = "pass2") 
+```
+
+
+## Export frequencies of merged cluster to dataframe
+
+```{r}
+ns <- table(
+  cluster_id = cluster_ids(sce1, k= "pass2"), 
+  sample_id = sample_ids(sce1))
+fq <- prop.table(ns, 2) * 100
+df <- as.data.frame(fq)
+```
+
+```{r}
+getwd()
+```
+
+# Add your working directory here.
+```{r}
+write.xlsx (df,  "/Users/rebeccapayne/OneDrive - Newcastle University/ILC_study/WBCAnalysis/FLow_Cytof_matched_analysis/FLow_Cytof_matched_project/cluster_freq_pass2.xlsx", rowNames = TRUE)
+
+```
+
+
+```{r}
+n_cells <- table(sample = sce1$sample_id, cluster = cluster_ids(sce1, "pass2"))
+
+write.xlsx(n_cells, "n_cells_pass2.xlsx")
+```
+
+
+
+## pass 3; yd T-cell, ab T-cell
+# Re-label meta20 clusters
+Create a xlsx file for merging clusters eg merging_pass2.xlsx
+
+
+```{r}
+merging_pass3 <- "merging_pass3.xlsx"   
+merging_pass3 <- read_excel(merging_pass3)          
+head(data.frame(merging_pass3)) 
+```
+
+Add all the factors for the cluster labels here.
+```{r}
+merging_pass3$new_cluster <- factor(merging_pass3$new_cluster,         
+                                     levels = c("yd_Tcell", "ab_Tcell", "other" )) 
+```
+
+
+```{r}
+sce1 <- mergeClusters(sce1, k = "meta20",                                  
+                     table = merging_pass3, id = "pass3", overwrite = TRUE) 
+```
+
+
+## Export frequencies of merged cluster to dataframe
+
+```{r}
+ns <- table(
+  cluster_id = cluster_ids(sce1, k= "pass3"), 
+  sample_id = sample_ids(sce1))
+fq <- prop.table(ns, 2) * 100
+df <- as.data.frame(fq)
+```
+
+
+```{r}
+getwd()
+```
+
+# Add your working directory here.
+```{r}
+write.xlsx (df,  "/Users/rebeccapayne/OneDrive - Newcastle University/ILC_study/WBCAnalysis/FLow_Cytof_matched_analysis/FLow_Cytof_matched_project/cluster_freq_pass3.xlsx", rowNames = TRUE)
+
+```
+
+
+```{r}
+n_cells <- table(sample = sce1$sample_id, cluster = cluster_ids(sce1, "pass3"))
+
+write.xlsx(n_cells, "n_cells_pass3.xlsx")
+```
+
+## pass 4; naive_CD8_T-cell
+# Re-label meta20 clusters
+Create a xlsx file for merging clusters eg merging_pass2.xlsx
+
+
+```{r}
+merging_pass4 <- "merging_pass4.xlsx"   
+merging_pass4 <- read_excel(merging_pass4)          
+head(data.frame(merging_pass4)) 
+```
+
+Add all the factors for the cluster labels here.
+```{r}
+merging_pass4$new_cluster <- factor(merging_pass4$new_cluster,         
+                                     levels = c("naive_CD8_T_cell", "other" )) 
+```
+
+
+```{r}
+sce1 <- mergeClusters(sce1, k = "meta20",                                  
+                     table = merging_pass4, id = "pass4", overwrite = TRUE) 
+```
+
+
+## Export frequencies of merged cluster to dataframe
+
+```{r}
+ns <- table(
+  cluster_id = cluster_ids(sce1, k= "pass4"), 
+  sample_id = sample_ids(sce1))
+fq <- prop.table(ns, 2) * 100
+df <- as.data.frame(fq)
+```
+
+
+
+```{r}
+getwd()
+```
+
+# Add your working directory here.
+```{r}
+write.xlsx (df,  "/Users/rebeccapayne/OneDrive - Newcastle University/ILC_study/WBCAnalysis/FLow_Cytof_matched_analysis/FLow_Cytof_matched_project/cluster_freq_pass4.xlsx", rowNames = TRUE)
+
+```
+
+
+```{r}
+n_cells <- table(sample = sce1$sample_id, cluster = cluster_ids(sce1, "pass4"))
+
+write.xlsx(n_cells, "n_cells_pass4.xlsx")
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
+
+
