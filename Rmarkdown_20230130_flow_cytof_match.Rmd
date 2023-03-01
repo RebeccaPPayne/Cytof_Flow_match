@@ -113,13 +113,13 @@ plotMultiHeatmap(sce,
     hm2_pal = c("grey95", "black"))
 ```
 
-### Monocytes identified by CD14+, CD16+ and CD4low expression -  cluster 1 and 4
+### Monocytes identified by CD14+, CD16+ and CD4low expression -  cluster 9
 
 ### Create new sce (sce1) with monocyte clustes removed
 
 
 ```{r}
-sce1 <- filterSCE(sce, cluster_id %in% c(2,3,5,6,7,8,9,10),  k = "meta10")
+sce1 <- filterSCE(sce, cluster_id %in% c(1, 2, 3, 4, 5, 6, 7, 8, 10),  k = "meta10")
 ```
 
 ```{r}
@@ -127,18 +127,24 @@ sce1 <- prepData(fs, panel, md, features = panel$fcs_colname, md_cols = list(fil
 ```
 
 
+# check filterSCE has wokred - quick comparison of n_cells 
+```{r}
+n_cells(sce1)
+```
+
+
 ### FlowSOM cluster of sce1
 ```{r}
-set.seed(1021)
+set.seed(4321)
 sce1 <- cluster(sce1, features = "type", 
                xdim = 10, ydim = 10, maxK = 20, 
-               verbose = FALSE, seed = 1021) 
+               verbose = FALSE, seed = 4321) 
 ```
 
 
 ### TSNE Dimension reduction of sce1
 ```{r}
-set.seed(1589)                                                                      
+set.seed(4321)                                                                      
 sce1 <- runDR(sce1, dr = "UMAP", cells = 500, features = "type")
 ```
 
